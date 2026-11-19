@@ -1,0 +1,42 @@
+{
+  "visitors": [
+    {"id": "V-2001", "label": "访客丁", "created_at": "2026-11-18T07:00:00Z"},
+    {"id": "V-2002", "label": "访客戊", "created_at": "2026-11-18T07:00:00Z"}
+  ],
+  "closed_sessions": [
+    {
+      "id": "S-V-2001-0",
+      "visitor_id": "V-2001",
+      "hits": [
+        {"id": "HC1", "event_ts": "2026-11-18T07:00:00Z", "page_path": "/home", "event_name": "view"},
+        {"id": "HC2", "event_ts": "2026-11-18T07:05:00Z", "page_path": "/item/9", "event_name": "click"}
+      ]
+    }
+  ],
+  "open_sessions": [
+    {
+      "id": "S-V-2001-1",
+      "visitor_id": "V-2001",
+      "hits": [
+        {"id": "HO1", "event_ts": "2026-11-18T09:00:00Z", "page_path": "/home", "event_name": "view"},
+        {"id": "HO2", "event_ts": "2026-11-18T09:03:00Z", "page_path": "/search", "event_name": "view"},
+        {"id": "HO3", "event_ts": "2026-11-18T10:30:00Z", "page_path": "/cart", "event_name": "view"},
+        {"id": "HO4", "event_ts": "2026-11-18T10:31:00Z", "page_path": "/cart", "event_name": "click"}
+      ]
+    },
+    {
+      "id": "S-V-2002-1",
+      "visitor_id": "V-2002",
+      "hits": [
+        {"id": "HP1", "event_ts": "2026-11-18T09:10:00Z", "page_path": "/home", "event_name": "view"},
+        {"id": "HP2", "event_ts": "2026-11-18T09:12:00Z", "page_path": "/about", "event_name": "view"}
+      ]
+    }
+  ],
+  "staged_batch": {
+    "batch_id": "B-stage-001",
+    "hits": [
+      {"id": "HS1", "visitor_id": "V-2001", "event_ts": "2026-11-18T11:00:00Z", "page_path": "/pay", "event_name": "view", "visitor_label": "访客丁"}
+    ]
+  }
+}
