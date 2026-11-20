@@ -28,6 +28,7 @@ export const api = {
   resplitRun: (body) => req('/api/resplit/run', { method: 'POST', body: JSON.stringify(body || {}) }),
   resplitBatches: () => req('/api/resplit/batches'),
   resplitVerify: () => req('/api/resplit/verify'),
+  resplitSourceVerify: () => req('/api/resplit/source-verify'),
   proofs: (sessionId) =>
     req(sessionId ? `/api/session-proofs?session_id=${encodeURIComponent(sessionId)}` : '/api/session-proofs'),
   settings: () => req('/api/settings'),

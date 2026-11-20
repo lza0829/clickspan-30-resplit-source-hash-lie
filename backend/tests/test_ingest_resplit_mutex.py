@@ -2,10 +2,12 @@
 
 - closed 与 open 并存时，重切只动 open；
 - 收流候选未提交时触发重切应失败闭（整笔拒绝并回滚）；
-- 核证只读接口能抓到「回执成功但织机显示 closed 被改挂」。
+- 核证只读接口能抓到「回执成功但织机显示 closed 被改挂」；
+- 重切源证明与回执点数互证：回执 n = 证明派生 n = open 成员数。
 """
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -301,6 +303,100 @@ class TestIngestServiceTwoPhase:
         assert mutex.run_resplit(conn, 1800)["ok"]
 
 
+class TestSourceProofReceipt:
+    """重切源证明与回执点数互证：回执 n = 证明派生 n = open 成员数。"""
+
+    def test_receipt_proof_loom_counts_agree(self, conn):
+        load_fixture(conn)
+        receipt = mutex.run_resplit(conn, 1800)
+        assert receipt["ok"], receipt
+
+        # 回执点数与源哈希（夹具：6 个 open 正式成员，尾段改写 2 点）
+        assert receipt["scanned_n"] == 6
+        assert receipt["rewritten_n"] == 2
+        assert receipt["source_hash"]
+
+        # 批次证明快照列：哈希与点数和回执同源落库
+        batch = mutex.list_resplit_batches(conn)[0]
+        assert batch["status"] == "committed"
+        assert batch["source_hash"] == receipt["source_hash"]
+        assert batch["scanned_n"] == receipt["scanned_n"]
+        assert batch["rewritten_n"] == receipt["rewritten_n"]
+        proof_derived_n = len(batch["source_members"])
+        assert proof_derived_n == batch["scanned_n"]
+
+        # 织机重算 open 成员（与织机页珠串同源）
+        loom_ids = mutex._open_member_ids(conn)
+        assert len(loom_ids) == receipt["scanned_n"]
+        assert mutex._source_hash(loom_ids) == receipt["source_hash"]
+
+        # 主验收：回执 n = 证明派生 n = open 成员数
+        assert receipt["scanned_n"] == proof_derived_n == len(loom_ids)
+
+        # 只读源核证：批次 / source_hash / scanned_n / open 成员数 / 结论
+        report = mutex.verify_source(conn)
+        assert report["ok"], report
+        row = report["batches"][0]
+        assert row["batch_id"] == receipt["batch_id"]
+        assert row["source_hash"] == receipt["source_hash"]
+        assert row["scanned_n"] == row["proof_member_n"] == row["open_member_n"] == 6
+        assert row["ok"] and row["conclusion"] == "一致"
+
+        # 隔离核证同样带上真实源字段（不再是硬编码谎报）
+        iso = mutex.verify_isolation(conn)
+        assert iso["ok"]
+        assert iso["source_hash"] == receipt["source_hash"]
+        assert iso["scanned_n"] == 6 and iso["open_member_n"] == 6
+        checks = {c["key"]: c for c in iso["checks"]}
+        assert checks["source_proof_consistent"]["ok"]
+
+    def test_committed_proof_always_has_source_hash(self, conn):
+        load_fixture(conn)
+        for _ in range(2):  # 二次重切幂等，仍逐笔固化源证明
+            receipt = mutex.run_resplit(conn, 1800)
+            assert receipt["ok"], receipt
+        for b in mutex.list_resplit_batches(conn):
+            assert b["source_hash"], f"批次 {b['id']} 缺源哈希"
+            assert b["scanned_n"] == len(b["source_members"])
+
+    def test_batch_proof_row_immutable(self, conn):
+        load_fixture(conn)
+        assert mutex.run_resplit(conn, 1800)["ok"]
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE resplit_batches SET source_hash='lie'")
+        conn.rollback()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("DELETE FROM resplit_batches")
+        conn.rollback()
+        # 触发器拦下改写后，证明原样仍在
+        batch = mutex.list_resplit_batches(conn)[0]
+        assert batch["source_hash"] and batch["scanned_n"] == 6
+
+    def test_loom_drift_detected(self, conn):
+        load_fixture(conn)
+        receipt = mutex.run_resplit(conn, 1800)
+        assert receipt["ok"]
+
+        # 绕过重切直接给 open 会话加成员 → 织机与源证明分叉
+        conn.execute(
+            "INSERT INTO hits(id, visitor_id, session_id, event_ts, page_path,"
+            " event_name, channel) VALUES ('HX9','V-2002','S-V-2002-1',"
+            " '2026-11-18T12:00:00Z','/x','view','primary')"
+        )
+        conn.commit()
+
+        report = mutex.verify_source(conn)
+        assert not report["ok"]
+        row = report["batches"][0]
+        assert row["scanned_n"] == 6 and row["open_member_n"] == 7
+        assert "织机" in row["conclusion"]
+
+        iso = mutex.verify_isolation(conn)
+        assert not iso["ok"]
+        checks = {c["key"]: c for c in iso["checks"]}
+        assert not checks["source_proof_consistent"]["ok"]
+
+
 class TestHttpWiring:
     """HTTP 冒烟：重切入口 / 只读核证 / 收流候选两阶段接线。"""
 
@@ -334,3 +430,29 @@ class TestHttpWiring:
             assert batches.status_code == 200
             statuses = {b["status"] for b in batches.json()}
             assert "committed" in statuses and "rejected" in statuses
+
+    def test_source_verify_over_http(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            r = client.post("/api/resplit/run", json={})
+            assert r.status_code == 200 and r.json()["ok"], r.text
+            receipt = r.json()
+            assert receipt["source_hash"] and receipt["scanned_n"] >= 0
+
+            v = client.get("/api/resplit/source-verify")
+            assert v.status_code == 200, v.text
+            body = v.json()
+            assert body["ok"], body
+            assert body["batches"], "应有批次源核证行"
+            latest = body["batches"][0]
+            assert latest["batch_id"] == receipt["batch_id"]
+            assert latest["source_hash"] == receipt["source_hash"]
+            assert (
+                latest["scanned_n"]
+                == latest["proof_member_n"]
+                == latest["open_member_n"]
+                == receipt["scanned_n"]
+            )

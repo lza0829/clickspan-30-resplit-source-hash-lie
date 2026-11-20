@@ -141,6 +141,16 @@ def verify_resplit():
         conn.close()
 
 
+@router.get("/resplit/source-verify")
+def verify_resplit_source():
+    """重切源核证（只读）：批次 / source_hash / scanned_n / open 成员数 / 结论。"""
+    conn = connect()
+    try:
+        return mutex.verify_source(conn)
+    finally:
+        conn.close()
+
+
 @router.get("/session-proofs")
 def session_proofs(session_id: str | None = None):
     conn = connect()

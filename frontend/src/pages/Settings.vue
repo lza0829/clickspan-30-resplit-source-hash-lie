@@ -44,7 +44,7 @@ async function resplit() {
     const r = await api.resplitRun({})
     receipt.value = r
     if (r.ok) {
-      msg.value = `重切完成 ${r.batch_id}：改动 ${r.changed_sessions.length} 个 open，切出 ${r.created_sessions.length} 个新会话`
+      msg.value = `重切完成 ${r.batch_id}：扫描 open 成员 ${r.scanned_n} 点（源哈希 ${r.source_hash}），改写 ${r.rewritten_n} 点，改动 ${r.changed_sessions.length} 个 open，切出 ${r.created_sessions.length} 个新会话`
     } else {
       err.value = `重切被拒（已整笔回滚）：${r.reason}`
     }
